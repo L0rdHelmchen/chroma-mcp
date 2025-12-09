@@ -3,7 +3,7 @@
 
 services:
   chroma-mcp:
-    image: ghcr.io/chroma-core/chroma-mcp:latest
+    image: ghcr.io/l0rdhelmchen/chroma-mcp:latest
     container_name: chroma-mcp
     restart: unless-stopped
 

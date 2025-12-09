@@ -6,7 +6,7 @@ set -e
 
 VERSION=${1:-latest}
 CONTAINER_NAME="chroma-mcp"
-IMAGE_NAME="ghcr.io/chroma-core/chroma-mcp"
+IMAGE_NAME="ghcr.io/l0rdhelmchen/chroma-mcp"
 BACKUP_TAG="backup-$(date +%Y%m%d-%H%M%S)"
 
 echo "🚀 Deploying Enhanced Chroma MCP Server to AWS"
@@ -189,15 +189,15 @@ echo "Image: $IMAGE_NAME:$VERSION"
 echo "Backup: $IMAGE_NAME:$BACKUP_TAG"
 echo ""
 echo "🔧 Management commands:"
-echo "  View logs:     docker logs -f $CONTAINER_NAME"
-echo "  Restart:       docker restart $CONTAINER_NAME"
-echo "  Stop:          docker stop $CONTAINER_NAME"
-echo "  Rollback:      docker stop $CONTAINER_NAME && docker rm $CONTAINER_NAME && docker run -d --name $CONTAINER_NAME --restart unless-stopped $IMAGE_NAME:$BACKUP_TAG"
+echo "  View logs:     podman logs -f $CONTAINER_NAME"
+echo "  Restart:       podman restart $CONTAINER_NAME"
+echo "  Stop:          podman stop $CONTAINER_NAME"
+echo "  Rollback:      podman stop $CONTAINER_NAME && podman rm $CONTAINER_NAME && podman run -d --name $CONTAINER_NAME --restart unless-stopped $IMAGE_NAME:$BACKUP_TAG"
 echo ""
 echo "📊 Monitoring:"
-echo "  Status:        docker ps | grep $CONTAINER_NAME"
-echo "  Stats:         docker stats $CONTAINER_NAME"
-echo "  Health:        docker logs $CONTAINER_NAME 2>&1 | grep -E '(✅|❌|⚠️)' | tail -5"
+echo "  Status:        podman ps | grep $CONTAINER_NAME"
+echo "  Stats:         podman stats $CONTAINER_NAME"
+echo "  Health:        podman logs $CONTAINER_NAME 2>&1 | grep -E '(✅|❌|⚠️)' | tail -5"
 echo ""
 
 # Final connection test

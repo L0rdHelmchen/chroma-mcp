@@ -1,0 +1,77 @@
+# Podman Compose für AWS Enhanced Chroma MCP Server
+# Verwendung: podman-compose -f podman-compose.aws.yml up -d
+# oder: podman play kube --configmap aws-environment.env podman-compose.aws.yml
+
+services:
+  chroma-mcp:
+    image: ghcr.io/l0rdhelmchen/chroma-mcp:latest
+    container_name: chroma-mcp
+    restart: unless-stopped
+
+    # Enhanced Connectivity Environment
+    environment:
+      # Core Chroma Settings
+      CHROMA_CLIENT_TYPE: ${CHROMA_CLIENT_TYPE:-http}
+      CHROMA_HOST: ${CHROMA_HOST}  # Must be set in .env file
+      CHROMA_PORT: ${CHROMA_PORT:-8000}
+      CHROMA_SSL: ${CHROMA_SSL:-false}
+
+      # Enhanced Connectivity Features (NEW!)
+      CHROMA_DEBUG: ${CHROMA_DEBUG:-true}
+      CHROMA_CONNECTION_TIMEOUT: ${CHROMA_CONNECTION_TIMEOUT:-60}
+      CHROMA_RETRY_ATTEMPTS: ${CHROMA_RETRY_ATTEMPTS:-5}
+      CHROMA_DOTENV_PATH: ${CHROMA_DOTENV_PATH:-/app/.chroma_env}
+
+      # Authentication (optional)
+      CHROMA_CUSTOM_AUTH_CREDENTIALS: ${CHROMA_CUSTOM_AUTH_CREDENTIALS:-}
+
+      # Embedding APIs (optional)
+      CHROMA_OPENAI_API_KEY: ${CHROMA_OPENAI_API_KEY:-}
+      CHROMA_COHERE_API_KEY: ${CHROMA_COHERE_API_KEY:-}
+      CHROMA_JINA_API_KEY: ${CHROMA_JINA_API_KEY:-}
+      CHROMA_VOYAGEAI_API_KEY: ${CHROMA_VOYAGEAI_API_KEY:-}
+
+    # Health Check mit Enhanced Features
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]  # Basic Python check
+      interval: ${HEALTH_CHECK_INTERVAL:-30s}
+      timeout: ${HEALTH_CHECK_TIMEOUT:-10s}
+      retries: ${HEALTH_CHECK_RETRIES:-3}
+      start_period: 40s
+
+    # Logging Configuration (Podman format)
+    logging:
+      driver: journald
+      options:
+        tag: chroma-mcp
+
+    # Network Configuration
+    networks:
+      - chroma-network
+
+    # Optional: Persistent volume for config files
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 100m
+      # Uncomment if you need persistent config:
+      # - ./config:/app/config:ro
+
+    # Labels für AWS-Management
+    labels:
+      com.podman.compose.service: "chroma-mcp"
+      com.aws.service: "chroma-mcp"
+      com.version: "${CHROMA_VERSION:-latest}"
+      com.deployment.strategy: "${DEPLOYMENT_STRATEGY:-rolling}"
+      com.enhanced-connectivity: "true"
+
+# Network Definition
+networks:
+  chroma-network:
+    driver: bridge
+
+# Optional: Volumes für persistente Daten
+volumes:
+  chroma-logs:
+    driver: local
