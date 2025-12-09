@@ -847,7 +847,9 @@ def main():
         logger.info(f"🚀 Starting MCP server with HTTP transport on {args.http_host}:{args.http_port}")
         logger.info(f"📡 Claude Code can connect to: http://{args.http_host}:{args.http_port}/mcp")
         try:
-            mcp.run(transport='http', host=args.http_host, port=args.http_port)
+            os.environ["MCP_HTTP_HOST"] = args.http_host
+            os.environ["MCP_HTTP_PORT"] = str(args.http_port)
+            mcp.run(transport="http")
         except Exception as e:
             logger.error(f"❌ MCP HTTP server failed to start: {str(e)}")
             raise
