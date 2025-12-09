@@ -11,6 +11,10 @@ import uuid
 import time
 import json
 from typing_extensions import TypedDict
+import logging
+import socket
+import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
 from chromadb.api.collection_configuration import (
@@ -25,6 +29,13 @@ from chromadb.utils.embedding_functions import (
     VoyageAIEmbeddingFunction,
     RoboflowEmbeddingFunction,
 )
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
 mcp = FastMCP("chroma")
@@ -64,80 +75,207 @@ def create_parser():
                        help='Use SSL (optional for http client)', 
                        type=lambda x: x.lower() in ['true', 'yes', '1', 't', 'y'],
                        default=os.getenv('CHROMA_SSL', 'true').lower() in ['true', 'yes', '1', 't', 'y'])
-    parser.add_argument('--dotenv-path', 
-                       help='Path to .env file', 
+    parser.add_argument('--dotenv-path',
+                       help='Path to .env file',
                        default=os.getenv('CHROMA_DOTENV_PATH', '.chroma_env'))
+    parser.add_argument('--debug',
+                       help='Enable debug logging',
+                       type=lambda x: x.lower() in ['true', 'yes', '1', 't', 'y'],
+                       default=os.getenv('CHROMA_DEBUG', 'false').lower() in ['true', 'yes', '1', 't', 'y'])
+    parser.add_argument('--connection-timeout',
+                       help='HTTP connection timeout in seconds',
+                       type=int,
+                       default=int(os.getenv('CHROMA_CONNECTION_TIMEOUT', '30')))
+    parser.add_argument('--retry-attempts',
+                       help='Number of retry attempts for failed connections',
+                       type=int,
+                       default=int(os.getenv('CHROMA_RETRY_ATTEMPTS', '3')))
     return parser
 
+def setup_logging(debug_mode: bool = False):
+    """Configure logging based on debug mode."""
+    level = logging.DEBUG if debug_mode else logging.INFO
+    logging.getLogger().setLevel(level)
+    logger.setLevel(level)
+
+    if debug_mode:
+        logger.info("Debug logging enabled")
+
+def validate_connection_config(args) -> None:
+    """Validate connection configuration before attempting to connect."""
+    if args.client_type == 'http':
+        if not args.host:
+            raise ValueError("HTTP client requires --host parameter")
+
+        # Test DNS resolution
+        try:
+            socket.gethostbyname(args.host)
+            logger.debug(f"DNS resolution successful for host: {args.host}")
+        except socket.gaierror as e:
+            raise ValueError(f"Cannot resolve hostname '{args.host}': {str(e)}")
+
+        # Validate port range
+        if args.port and (args.port < 1 or args.port > 65535):
+            raise ValueError(f"Invalid port: {args.port}")
+
+        logger.info(f"Connection config validated - Host: {args.host}, Port: {args.port}, SSL: {args.ssl}")
+
+def test_http_connection(host: str, port: int = None, ssl: bool = True, timeout: int = 30) -> bool:
+    """Test HTTP connection to Chroma server."""
+    port = port or (443 if ssl else 80)
+    protocol = 'https' if ssl else 'http'
+    test_url = f"{protocol}://{host}:{port}/api/v1/heartbeat"
+
+    logger.info(f"Testing connection to {test_url} with timeout {timeout}s")
+
+    try:
+        with httpx.Client(timeout=timeout, verify=ssl) as client:
+            response = client.get(test_url)
+            logger.info(f"Connection test successful: HTTP {response.status_code}")
+            return True
+    except httpx.ConnectTimeout:
+        logger.error(f"Connection timeout to {host}:{port} after {timeout}s")
+        return False
+    except httpx.ConnectError as e:
+        logger.error(f"Connection failed to {host}:{port}: {str(e)}")
+        return False
+    except ssl.SSLError as e:
+        logger.error(f"SSL handshake failed with {host}:{port}: {str(e)}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected connection error to {host}:{port}: {str(e)}")
+        return False
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type((ConnectionError, ssl.SSLError, httpx.ConnectError))
+)
+def create_http_client_with_retry(host: str, port: int = None, ssl: bool = True,
+                                settings: Settings = None, timeout: int = 30,
+                                tenant: str = None, database: str = None,
+                                headers: dict = None) -> chromadb.HttpClient:
+    """Create ChromaDB HTTP client with retry logic."""
+    logger.info(f"Attempting to create HTTP client for {host}:{port}, SSL: {ssl}")
+
+    try:
+        client = chromadb.HttpClient(
+            host=host,
+            port=port,
+            ssl=ssl,
+            settings=settings or Settings(),
+            tenant=tenant,
+            database=database,
+            headers=headers
+        )
+
+        # Test the connection by listing collections
+        client.list_collections(limit=1)
+        logger.info("ChromaDB HTTP client created and tested successfully")
+        return client
+
+    except ssl.SSLError as e:
+        logger.error(f"SSL connection failed to {host}:{port}: {str(e)}")
+        raise ConnectionError(f"SSL handshake failed: {str(e)}") from e
+    except Exception as e:
+        logger.error(f"Failed to create ChromaDB HTTP client: {str(e)}")
+        raise ConnectionError(f"ChromaDB connection failed: {str(e)}") from e
+
 def get_chroma_client(args=None):
-    """Get or create the global Chroma client instance."""
+    """Get or create the global Chroma client instance with enhanced error handling."""
     global _chroma_client
     if _chroma_client is None:
         if args is None:
             # Create parser and parse args if not provided
             parser = create_parser()
             args = parser.parse_args()
-        
+
+        # Setup logging first
+        setup_logging(args.debug)
+
         # Load environment variables from .env file if it exists
         load_dotenv(dotenv_path=args.dotenv_path)
+        logger.info(f"Initializing Chroma client - Type: {args.client_type}")
+
+        # Validate configuration
+        validate_connection_config(args)
+
         if args.client_type == 'http':
-            if not args.host:
-                raise ValueError("Host must be provided via --host flag or CHROMA_HOST environment variable when using HTTP client")
-            
+            logger.info(f"Creating HTTP client for {args.host}:{args.port}")
+
             settings = Settings()
             if args.custom_auth_credentials:
                 settings = Settings(
                     chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
                     chroma_client_auth_credentials=args.custom_auth_credentials
                 )
-            
-            # Handle SSL configuration
+                logger.info("Using custom authentication credentials")
+
+            # Test connection before creating client (optional but recommended)
+            if args.debug:
+                test_http_connection(args.host, args.port, args.ssl, args.connection_timeout)
+
+            # Create client with retry logic
             try:
-                _chroma_client = chromadb.HttpClient(
+                _chroma_client = create_http_client_with_retry(
                     host=args.host,
                     port=args.port if args.port else None,
                     ssl=args.ssl,
-                    settings=settings
+                    settings=settings,
+                    timeout=args.connection_timeout
                 )
-            except ssl.SSLError as e:
-                print(f"SSL connection failed: {str(e)}")
-                raise
-            except Exception as e:
-                print(f"Error connecting to HTTP client: {str(e)}")
-                raise
-            
+            except ConnectionError as e:
+                logger.error(f"Failed to establish HTTP connection after retries: {str(e)}")
+                raise ValueError(f"HTTP connection failed: {str(e)}") from e
+
         elif args.client_type == 'cloud':
+            logger.info("Creating Chroma Cloud client")
+
             if not args.tenant:
                 raise ValueError("Tenant must be provided via --tenant flag or CHROMA_TENANT environment variable when using cloud client")
             if not args.database:
                 raise ValueError("Database must be provided via --database flag or CHROMA_DATABASE environment variable when using cloud client")
             if not args.api_key:
                 raise ValueError("API key must be provided via --api-key flag or CHROMA_API_KEY environment variable when using cloud client")
-            
+
+            # Test connection to Chroma Cloud if in debug mode
+            if args.debug:
+                test_http_connection("api.trychroma.com", None, True, args.connection_timeout)
+
             try:
-                _chroma_client = chromadb.HttpClient(
+                _chroma_client = create_http_client_with_retry(
                     host="api.trychroma.com",
                     ssl=True,  # Always use SSL for cloud
                     tenant=args.tenant,
                     database=args.database,
-                    headers={
-                        'x-chroma-token': args.api_key
-                    }
+                    headers={'x-chroma-token': args.api_key},
+                    timeout=args.connection_timeout
                 )
-            except ssl.SSLError as e:
-                print(f"SSL connection failed: {str(e)}")
-                raise
-            except Exception as e:
-                print(f"Error connecting to cloud client: {str(e)}")
-                raise
-                
+            except ConnectionError as e:
+                logger.error(f"Failed to establish Cloud connection: {str(e)}")
+                raise ValueError(f"Chroma Cloud connection failed: {str(e)}") from e
+
         elif args.client_type == 'persistent':
+            logger.info(f"Creating persistent client with data directory: {args.data_dir}")
             if not args.data_dir:
                 raise ValueError("Data directory must be provided via --data-dir flag when using persistent client")
-            _chroma_client = chromadb.PersistentClient(path=args.data_dir)
+
+            try:
+                _chroma_client = chromadb.PersistentClient(path=args.data_dir)
+                logger.info("Persistent client created successfully")
+            except Exception as e:
+                logger.error(f"Failed to create persistent client: {str(e)}")
+                raise ValueError(f"Persistent client creation failed: {str(e)}") from e
+
         else:  # ephemeral
-            _chroma_client = chromadb.EphemeralClient()
-            
+            logger.info("Creating ephemeral client")
+            try:
+                _chroma_client = chromadb.EphemeralClient()
+                logger.info("Ephemeral client created successfully")
+            except Exception as e:
+                logger.error(f"Failed to create ephemeral client: {str(e)}")
+                raise ValueError(f"Ephemeral client creation failed: {str(e)}") from e
+
     return _chroma_client
 
 ##### Collection Tools #####
@@ -631,21 +769,27 @@ def validate_thought_data(input_data: Dict) -> Dict:
     }
 
 def main():
-    """Entry point for the Chroma MCP server."""
+    """Entry point for the Chroma MCP server with enhanced error handling."""
     parser = create_parser()
     args = parser.parse_args()
-    
+
+    # Setup logging early
+    setup_logging(args.debug)
+
     if args.dotenv_path:
         load_dotenv(dotenv_path=args.dotenv_path)
         # re-parse args to read the updated environment variables
         parser = create_parser()
         args = parser.parse_args()
-    
+
+    logger.info(f"Starting Chroma MCP Server - Client Type: {args.client_type}")
+    logger.info(f"Configuration - Debug: {args.debug}, Timeout: {args.connection_timeout}s, Retries: {args.retry_attempts}")
+
     # Validate required arguments based on client type
     if args.client_type == 'http':
         if not args.host:
             parser.error("Host must be provided via --host flag or CHROMA_HOST environment variable when using HTTP client")
-    
+
     elif args.client_type == 'cloud':
         if not args.tenant:
             parser.error("Tenant must be provided via --tenant flag or CHROMA_TENANT environment variable when using cloud client")
@@ -653,18 +797,36 @@ def main():
             parser.error("Database must be provided via --database flag or CHROMA_DATABASE environment variable when using cloud client")
         if not args.api_key:
             parser.error("API key must be provided via --api-key flag or CHROMA_API_KEY environment variable when using cloud client")
-    
-    # Initialize client with parsed args
+
+    # Initialize client with parsed args and enhanced error handling
     try:
-        get_chroma_client(args)
-        print("Successfully initialized Chroma client")
+        client = get_chroma_client(args)
+        logger.info("✅ Chroma client initialized successfully")
+
+        # Perform a health check
+        if args.client_type in ['http', 'cloud']:
+            try:
+                collections = client.list_collections(limit=1)
+                logger.info(f"✅ Connection health check passed - found {len(collections)} collections")
+            except Exception as e:
+                logger.warning(f"⚠️  Health check warning: {str(e)}")
+
     except Exception as e:
-        print(f"Failed to initialize Chroma client: {str(e)}")
+        logger.error(f"❌ Failed to initialize Chroma client: {str(e)}")
+        logger.error("💡 Troubleshooting tips:")
+        logger.error("   1. Check network connectivity to your Chroma server")
+        logger.error("   2. Verify host/port configuration")
+        logger.error("   3. Test SSL settings (try --ssl=false for debugging)")
+        logger.error("   4. Enable debug mode with --debug=true")
         raise
-    
+
     # Initialize and run the server
-    print("Starting MCP server")
-    mcp.run(transport='stdio')
+    logger.info("🚀 Starting MCP server with STDIO transport")
+    try:
+        mcp.run(transport='stdio')
+    except Exception as e:
+        logger.error(f"❌ MCP server failed to start: {str(e)}")
+        raise
     
 if __name__ == "__main__":
     main()

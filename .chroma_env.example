@@ -1,0 +1,44 @@
+# Chroma MCP Server Configuration
+# Copy this file to .chroma_env and customize for your environment
+
+# Client Type: ephemeral, persistent, http, cloud
+CHROMA_CLIENT_TYPE=ephemeral
+
+# Debug Settings (set to true for detailed logging)
+CHROMA_DEBUG=false
+
+# Connection Settings
+CHROMA_CONNECTION_TIMEOUT=30
+CHROMA_RETRY_ATTEMPTS=3
+
+# === HTTP Client Configuration (for self-hosted Chroma) ===
+# Uncomment and configure if using CHROMA_CLIENT_TYPE=http
+# CHROMA_HOST=localhost
+# CHROMA_PORT=8000
+# CHROMA_SSL=false
+# CHROMA_CUSTOM_AUTH_CREDENTIALS=your-auth-credentials
+
+# === Cloud Client Configuration (for Chroma Cloud) ===
+# Uncomment and configure if using CHROMA_CLIENT_TYPE=cloud
+# CHROMA_TENANT=your-tenant-id
+# CHROMA_DATABASE=your-database-name
+# CHROMA_API_KEY=your-api-key
+
+# === Persistent Client Configuration ===
+# Uncomment and configure if using CHROMA_CLIENT_TYPE=persistent
+# CHROMA_DATA_DIR=/path/to/your/chroma/data
+
+# === Embedding Function API Keys ===
+# Add API keys for external embedding functions as needed
+# CHROMA_OPENAI_API_KEY=your-openai-key
+# CHROMA_COHERE_API_KEY=your-cohere-key
+# CHROMA_JINA_API_KEY=your-jina-key
+# CHROMA_VOYAGEAI_API_KEY=your-voyage-key
+# CHROMA_ROBOFLOW_API_KEY=your-roboflow-key
+
+# === Troubleshooting Tips ===
+# If experiencing HTTP connectivity issues:
+# 1. Enable debug mode: CHROMA_DEBUG=true
+# 2. Increase timeout: CHROMA_CONNECTION_TIMEOUT=60
+# 3. Test without SSL: CHROMA_SSL=false
+# 4. Verify host/port accessibility: telnet <host> <port>
