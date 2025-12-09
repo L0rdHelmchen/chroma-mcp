@@ -50,7 +50,11 @@ jobs:
 
       - name: Push container image
         run: |
-          podman push ${{ steps.meta.outputs.tags }}
+          # Convert tags to lowercase for Podman compatibility
+          IMAGE_UPPER="ghcr.io/${{ env.IMAGE_NAME }}:latest"
+          IMAGE_LOWER=$(echo "$IMAGE_UPPER" | tr '[:upper:]' '[:lower:]')
+          echo "Pushing $IMAGE_LOWER"
+          podman push "$IMAGE_LOWER"
 
       - name: Output image details
         run: |
