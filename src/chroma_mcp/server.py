@@ -56,9 +56,10 @@ def create_parser():
     parser.add_argument('--host', 
                        help='Chroma host (required for http client)', 
                        default=os.getenv('CHROMA_HOST'))
-    parser.add_argument('--port', 
-                       help='Chroma port (optional for http client)', 
-                       default=os.getenv('CHROMA_PORT'))
+    parser.add_argument('--port',
+                       help='Chroma port (optional for http client)',
+                       type=int,
+                       default=int(os.getenv('CHROMA_PORT', '0')) if os.getenv('CHROMA_PORT') else None)
     parser.add_argument('--custom-auth-credentials',
                        help='Custom auth credentials (optional for http client)', 
                        default=os.getenv('CHROMA_CUSTOM_AUTH_CREDENTIALS'))
@@ -117,6 +118,8 @@ def validate_connection_config(args) -> None:
         # Validate port range
         if args.port and (args.port < 1 or args.port > 65535):
             raise ValueError(f"Invalid port: {args.port}")
+        elif args.port == 0:
+            args.port = None  # Handle default 0 as None
 
         logger.info(f"Connection config validated - Host: {args.host}, Port: {args.port}, SSL: {args.ssl}")
 

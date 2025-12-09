@@ -41,8 +41,10 @@ def test_http_connectivity_validation():
     """Test HTTP connection validation without actually connecting."""
     print("\n=== Testing HTTP Connection Validation ===")
 
-    # Test invalid hostname
     parser = create_parser()
+
+    # Test 1: Invalid hostname
+    print("1. Testing invalid hostname...")
     args = parser.parse_args([
         '--client-type', 'http',
         '--host', 'invalid-hostname-that-does-not-exist.local',
@@ -55,10 +57,64 @@ def test_http_connectivity_validation():
         return False
     except ValueError as e:
         print(f"✅ Validation correctly failed: {str(e)}")
-        return True
     except Exception as e:
         print(f"❌ Unexpected error during validation: {str(e)}")
         return False
+
+    # Test 2: Valid port as integer (CLI)
+    print("2. Testing valid port from CLI...")
+    try:
+        args = parser.parse_args([
+            '--client-type', 'http',
+            '--host', 'localhost',
+            '--port', '8000',
+            '--debug', 'true'
+        ])
+        print(f"   Port type: {type(args.port)}, value: {args.port}")
+        validate_connection_config(args)
+        print("✅ Port validation passed")
+    except Exception as e:
+        print(f"❌ Port validation failed: {str(e)}")
+        return False
+
+    # Test 3: Invalid port (too high)
+    print("3. Testing invalid port (70000)...")
+    try:
+        args = parser.parse_args([
+            '--client-type', 'http',
+            '--host', 'localhost',
+            '--port', '70000',
+            '--debug', 'true'
+        ])
+        validate_connection_config(args)
+        print("❌ Should have failed for invalid port")
+        return False
+    except ValueError as e:
+        print(f"✅ Invalid port correctly rejected: {str(e)}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {str(e)}")
+        return False
+
+    # Test 4: Port from environment variable
+    print("4. Testing port from environment variable...")
+    import os
+    os.environ['CHROMA_PORT'] = '9000'
+    try:
+        args = parser.parse_args([
+            '--client-type', 'http',
+            '--host', 'localhost',
+            '--debug', 'true'
+        ])
+        print(f"   Environment port type: {type(args.port)}, value: {args.port}")
+        validate_connection_config(args)
+        print("✅ Environment port validation passed")
+    except Exception as e:
+        print(f"❌ Environment port validation failed: {str(e)}")
+        return False
+    finally:
+        os.environ.pop('CHROMA_PORT', None)
+
+    return True
 
 def test_connection_to_localhost():
     """Test connection to localhost (if Chroma is running locally)."""
