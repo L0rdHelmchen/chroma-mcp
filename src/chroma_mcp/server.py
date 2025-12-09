@@ -154,23 +154,31 @@ def test_http_connection(host: str, port: int = None, ssl: bool = True, timeout:
     wait=wait_exponential(multiplier=1, min=4, max=10),
     retry=retry_if_exception_type((ConnectionError, ssl.SSLError, httpx.ConnectError))
 )
-def create_http_client_with_retry(host: str, port: int = None, ssl: bool = True,
+def create_http_client_with_retry(host: str, port: int = None, ssl_enabled: bool = True,
                                 settings: Settings = None, timeout: int = 30,
                                 tenant: str = None, database: str = None,
                                 headers: dict = None) -> chromadb.HttpClient:
     """Create ChromaDB HTTP client with retry logic."""
-    logger.info(f"Attempting to create HTTP client for {host}:{port}, SSL: {ssl}")
+    logger.info(f"Attempting to create HTTP client for {host}:{port}, SSL: {ssl_enabled}")
 
     try:
-        client = chromadb.HttpClient(
-            host=host,
-            port=port,
-            ssl=ssl,
-            settings=settings or Settings(),
-            tenant=tenant,
-            database=database,
-            headers=headers
-        )
+        # For self-hosted ChromaDB, don't pass tenant/database unless explicitly set
+        client_kwargs = {
+            "host": host,
+            "port": port,
+            "ssl": ssl_enabled,
+            "settings": settings or Settings()
+        }
+
+        # Only add tenant/database/headers if they are explicitly provided
+        if tenant is not None:
+            client_kwargs["tenant"] = tenant
+        if database is not None:
+            client_kwargs["database"] = database
+        if headers is not None:
+            client_kwargs["headers"] = headers
+
+        client = chromadb.HttpClient(**client_kwargs)
 
         # Test the connection by listing collections
         client.list_collections(limit=1)
@@ -223,7 +231,7 @@ def get_chroma_client(args=None):
                 _chroma_client = create_http_client_with_retry(
                     host=args.host,
                     port=args.port if args.port else None,
-                    ssl=args.ssl,
+                    ssl_enabled=args.ssl,
                     settings=settings,
                     timeout=args.connection_timeout
                 )
@@ -248,7 +256,7 @@ def get_chroma_client(args=None):
             try:
                 _chroma_client = create_http_client_with_retry(
                     host="api.trychroma.com",
-                    ssl=True,  # Always use SSL for cloud
+                    ssl_enabled=True,  # Always use SSL for cloud
                     tenant=args.tenant,
                     database=args.database,
                     headers={'x-chroma-token': args.api_key},
