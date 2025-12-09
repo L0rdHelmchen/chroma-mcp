@@ -91,6 +91,17 @@ def create_parser():
                        help='Number of retry attempts for failed connections',
                        type=int,
                        default=int(os.getenv('CHROMA_RETRY_ATTEMPTS', '3')))
+    parser.add_argument('--transport',
+                       choices=['stdio', 'http'],
+                       default=os.getenv('MCP_TRANSPORT', 'stdio'),
+                       help='MCP transport protocol (stdio for local, http for remote)')
+    parser.add_argument('--http-port',
+                       help='HTTP port for MCP server when using http transport',
+                       type=int,
+                       default=int(os.getenv('MCP_HTTP_PORT', '8013')))
+    parser.add_argument('--http-host',
+                       help='HTTP host for MCP server when using http transport',
+                       default=os.getenv('MCP_HTTP_HOST', '0.0.0.0'))
     return parser
 
 def setup_logging(debug_mode: bool = False):
@@ -832,11 +843,20 @@ def main():
         raise
 
     # Initialize and run the server
-    logger.info("🚀 Starting MCP server with STDIO transport")
-    try:
-        mcp.run(transport='stdio')
-    except Exception as e:
-        logger.error(f"❌ MCP server failed to start: {str(e)}")
+    if args.transport == 'http':
+        logger.info(f"🚀 Starting MCP server with HTTP transport on {args.http_host}:{args.http_port}")
+        logger.info(f"📡 Claude Code can connect to: http://{args.http_host}:{args.http_port}/mcp")
+        try:
+            mcp.run(transport='http', host=args.http_host, port=args.http_port)
+        except Exception as e:
+            logger.error(f"❌ MCP HTTP server failed to start: {str(e)}")
+            raise
+    else:
+        logger.info("🚀 Starting MCP server with STDIO transport")
+        try:
+            mcp.run(transport='stdio')
+        except Exception as e:
+            logger.error(f"❌ MCP server failed to start: {str(e)}")
         raise
     
 if __name__ == "__main__":
